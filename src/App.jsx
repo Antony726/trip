@@ -53,7 +53,7 @@ export default function App() {
     return saved ? JSON.parse(saved) : INITIAL_JOURNEY;
   });
 
-  // Sync state to LocalStorage
+  // Backup LocalStorage sync
   useEffect(() => { localStorage.setItem('ooty_friends', JSON.stringify(friends)); }, [friends]);
   useEffect(() => { localStorage.setItem('ooty_categories', JSON.stringify(categories)); }, [categories]);
   useEffect(() => { localStorage.setItem('ooty_expenses', JSON.stringify(expenses)); }, [expenses]);
@@ -61,22 +61,106 @@ export default function App() {
   useEffect(() => { localStorage.setItem('ooty_planner', JSON.stringify(planner)); }, [planner]);
   useEffect(() => { localStorage.setItem('ooty_journey', JSON.stringify(journey)); }, [journey]);
 
-  // Firebase Realtime / Firestore Listeners
+  // ==========================================
+  // REALTIME FIREBASE LISTENERS (AUTO REFRESH)
+  // ==========================================
+
+  // A) Expenses Realtime Listener
   useEffect(() => {
     if (!firestoreDb) return;
     try {
       const unsub = onSnapshot(collection(firestoreDb, "expenses"), (snapshot) => {
         const list = [];
         snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
-        if (list.length > 0) setExpenses(list);
-      }, () => {});
+        setExpenses(list);
+      }, (err) => console.log("Expenses sync info:", err));
       return () => unsub();
     } catch (e) {}
   }, []);
 
-  // Handlers for Expenses
+  // B) Friends Names Realtime Listener
+  useEffect(() => {
+    if (!firestoreDb) return;
+    try {
+      const unsub = onSnapshot(collection(firestoreDb, "friends"), (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        if (list.length > 0) {
+          // Sort by id order
+          list.sort((a, b) => parseInt(a.id) - parseInt(b.id));
+          setFriends(list);
+        }
+      }, (err) => console.log("Friends sync info:", err));
+      return () => unsub();
+    } catch (e) {}
+  }, []);
+
+  // C) Categories Realtime Listener
+  useEffect(() => {
+    if (!firestoreDb) return;
+    try {
+      const unsub = onSnapshot(collection(firestoreDb, "categories"), (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        if (list.length > 0) setCategories(list);
+      }, (err) => {});
+      return () => unsub();
+    } catch (e) {}
+  }, []);
+
+  // D) Polls Realtime Listener
+  useEffect(() => {
+    if (!firestoreDb) return;
+    try {
+      const unsub = onSnapshot(collection(firestoreDb, "polls"), (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        if (list.length > 0) setPolls(list);
+      }, (err) => {});
+      return () => unsub();
+    } catch (e) {}
+  }, []);
+
+  // E) Planner Realtime Listener
+  useEffect(() => {
+    if (!firestoreDb) return;
+    try {
+      const unsub = onSnapshot(collection(firestoreDb, "planner"), (snapshot) => {
+        const list = [];
+        snapshot.forEach((doc) => list.push({ id: doc.id, ...doc.data() }));
+        if (list.length > 0) {
+          list.sort((a, b) => (a.dayIndex || 0) - (b.dayIndex || 0));
+          setPlanner(list);
+        }
+      }, (err) => {});
+      return () => unsub();
+    } catch (e) {}
+  }, []);
+
+  // Realtime Database Fallback Listener for Expenses
+  useEffect(() => {
+    if (!realtimeDb) return;
+    try {
+      const expensesRef = ref(realtimeDb, 'expenses');
+      const unsubscribe = onValue(expensesRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data) {
+          const list = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+          setExpenses(list);
+        }
+      }, () => {});
+      return () => unsubscribe();
+    } catch (e) {}
+  }, []);
+
+  // ==========================================
+  // SYNC ACTION HANDLERS
+  // ==========================================
+
+  // 1. Add Expense
   const handleAddExpense = async (newExpense) => {
-    setExpenses([newExpense, ...expenses]);
+    setExpenses(prev => [newExpense, ...prev.filter(e => e.id !== newExpense.id)]);
+    
     if (firestoreDb) {
       try { await setDoc(doc(firestoreDb, "expenses", newExpense.id), newExpense); } catch(e){}
     }
@@ -85,8 +169,10 @@ export default function App() {
     }
   };
 
+  // 2. Delete Expense
   const handleDeleteExpense = async (expenseId) => {
-    setExpenses(expenses.filter(e => e.id !== expenseId));
+    setExpenses(prev => prev.filter(e => e.id !== expenseId));
+
     if (firestoreDb) {
       try { await deleteDoc(doc(firestoreDb, "expenses", expenseId)); } catch(e){}
     }
@@ -95,29 +181,92 @@ export default function App() {
     }
   };
 
-  // Handlers for Polls
-  const handleAddPoll = (newPoll) => {
-    setPolls([newPoll, ...polls]);
-  };
+  // 3. Update Friends Names (Broadcasts live to all devices)
+  const handleUpdateFriends = async (updatedFriends) => {
+    setFriends(updatedFriends);
 
-  const handleVotePoll = (pollId, optionId, voterName) => {
-    const updated = polls.map(p => {
-      if (p.id !== pollId) return p;
-      const opts = p.options.map(opt => {
-        // Remove voter from all options first, then add to selected
-        const cleanVotes = (opt.votes || []).filter(v => v !== voterName);
-        if (opt.id === optionId) {
-          cleanVotes.push(voterName);
+    if (firestoreDb) {
+      try {
+        for (const friend of updatedFriends) {
+          await setDoc(doc(firestoreDb, "friends", friend.id), friend);
         }
-        return { ...opt, votes: cleanVotes };
-      });
-      return { ...p, options: opts };
-    });
-    setPolls(updated);
+      } catch (e) {}
+    }
+    if (realtimeDb) {
+      try {
+        for (const friend of updatedFriends) {
+          set(ref(realtimeDb, `friends/${friend.id}`), friend).catch(()=>{});
+        }
+      } catch (e) {}
+    }
   };
 
-  const handleDeletePoll = (pollId) => {
-    setPolls(polls.filter(p => p.id !== pollId));
+  // 4. Categories Handlers
+  const handleAddCategory = async (newCat) => {
+    if (categories.some(c => c.id === newCat.id)) return;
+    const updated = [...categories, newCat];
+    setCategories(updated);
+
+    if (firestoreDb) {
+      try { await setDoc(doc(firestoreDb, "categories", newCat.id), newCat); } catch(e){}
+    }
+  };
+
+  const handleRemoveCategory = async (catId) => {
+    if (categories.length <= 1) return;
+    setCategories(prev => prev.filter(c => c.id !== catId));
+
+    if (firestoreDb) {
+      try { await deleteDoc(doc(firestoreDb, "categories", catId)); } catch(e){}
+    }
+  };
+
+  // 5. Polls Handlers
+  const handleAddPoll = async (newPoll) => {
+    setPolls(prev => [newPoll, ...prev]);
+    if (firestoreDb) {
+      try { await setDoc(doc(firestoreDb, "polls", newPoll.id), newPoll); } catch(e){}
+    }
+  };
+
+  const handleVotePoll = async (pollId, optionId, voterName) => {
+    const targetPoll = polls.find(p => p.id === pollId);
+    if (!targetPoll) return;
+
+    const updatedOptions = targetPoll.options.map(opt => {
+      const cleanVotes = (opt.votes || []).filter(v => v !== voterName);
+      if (opt.id === optionId) {
+        cleanVotes.push(voterName);
+      }
+      return { ...opt, votes: cleanVotes };
+    });
+
+    const updatedPoll = { ...targetPoll, options: updatedOptions };
+    setPolls(prev => prev.map(p => p.id === pollId ? updatedPoll : p));
+
+    if (firestoreDb) {
+      try { await setDoc(doc(firestoreDb, "polls", pollId), updatedPoll); } catch(e){}
+    }
+  };
+
+  const handleDeletePoll = async (pollId) => {
+    setPolls(prev => prev.filter(p => p.id !== pollId));
+    if (firestoreDb) {
+      try { await deleteDoc(doc(firestoreDb, "polls", pollId)); } catch(e){}
+    }
+  };
+
+  // 6. Planner Handler
+  const handleUpdatePlanner = async (updatedPlanner) => {
+    setPlanner(updatedPlanner);
+    if (firestoreDb) {
+      try {
+        updatedPlanner.forEach(async (dayGroup, idx) => {
+          const docId = `day-${idx + 1}`;
+          await setDoc(doc(firestoreDb, "planner", docId), { ...dayGroup, id: docId, dayIndex: idx });
+        });
+      } catch (e) {}
+    }
   };
 
   const totalExpense = expenses.reduce((sum, item) => sum + item.amount, 0);
@@ -131,7 +280,7 @@ export default function App() {
         : 'bg-retro-bg text-black font-retro'
     }`}>
       
-      {/* HEADER & TOP SCROLLABLE NAVIGATION */}
+      {/* HEADER & TOP NAVIGATION */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -150,8 +299,8 @@ export default function App() {
             expenses={expenses}
             onAddExpense={handleAddExpense}
             onDeleteExpense={handleDeleteExpense}
-            onAddCategory={(c) => setCategories([...categories, c])}
-            onRemoveCategory={(id) => setCategories(categories.filter(c => c.id !== id))}
+            onAddCategory={handleAddCategory}
+            onRemoveCategory={handleRemoveCategory}
             theme={theme}
           />
         )}
@@ -183,7 +332,7 @@ export default function App() {
         {activeTab === 'planner' && (
           <TripPlanner
             planner={planner}
-            onUpdatePlanner={setPlanner}
+            onUpdatePlanner={handleUpdatePlanner}
             theme={theme}
           />
         )}
@@ -218,7 +367,7 @@ export default function App() {
         isOpen={isFriendsModalOpen}
         onClose={() => setIsFriendsModalOpen(false)}
         friends={friends}
-        onUpdateFriends={setFriends}
+        onUpdateFriends={handleUpdateFriends}
         theme={theme}
       />
     </div>
