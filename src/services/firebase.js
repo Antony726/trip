@@ -2,15 +2,16 @@ import { initializeApp, getApps } from "firebase/app";
 import { getFirestore, collection, addDoc, onSnapshot, deleteDoc, doc, setDoc } from "firebase/firestore";
 import { getDatabase, ref, set, onValue, remove } from "firebase/database";
 
+// Firebase Web SDK Configuration (read from environment variables)
 const firebaseConfig = {
-  apiKey: "AIzaSyDtkev0vVhQ7-wxiIKUCcHTy3NE1EA9IMg",
-  authDomain: "ooty-820cc.firebaseapp.com",
-  projectId: "ooty-820cc",
-  storageBucket: "ooty-820cc.firebasestorage.app",
-  messagingSenderId: "445884904089",
-  appId: "1:445884904089:web:57dd107ee3fa87c188fe08",
-  measurementId: "G-10RYKGM574",
-  databaseURL: "https://ooty-820cc-default-rtdb.firebaseio.com" // Fallback RTDB URL if using RTDB
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDtkev0vVhQ7-wxiIKUCcHTy3NE1EA9IMg",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ooty-820cc.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ooty-820cc",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ooty-820cc.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "445884904089",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:445884904089:web:57dd107ee3fa87c188fe08",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-10RYKGM574",
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || "https://ooty-820cc-default-rtdb.firebaseio.com"
 };
 
 let app;
